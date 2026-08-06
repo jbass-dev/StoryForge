@@ -23,31 +23,35 @@ const PORT = process.env.PORT || 4000;
 // Falls back to allowing any origin when unset, which is fine for local dev
 // but should be set once this is publicly deployed.
 const FRONTEND_URL = process.env.FRONTEND_URL;
-const allowedOrigins = FRONTEND_URL
-  ? FRONTEND_URL.split(",").map((s) => s.trim()).filter(Boolean)
-  : [];
+const allowedOrigins = [
+  // Stable production domain. Hardcoded so CORS works even if FRONTEND_URL
+  // isn't set in the Railway environment.
+  "https://story-forge-tau-three.vercel.app",
+  ...(FRONTEND_URL
+    ? FRONTEND_URL.split(",").map((s) => s.trim()).filter(Boolean)
+    : []),
+];
 
 // Vercel also gives every individual deployment of this project its own
-// unique URL (e.g. story-forge-<hash>-<team>.vercel.app) separate from the
-// stable production domain set above. Allow those too, so CORS doesn't break
-// just because someone opens a deployment-specific link (which Vercel shows
-// after every deploy) instead of the production URL.
-const VERCEL_PREVIEW_PATTERN = /^https:\/\/story-forge-[a-z0-9]+-jbass-devs-projects\.vercel\.app$/;
+// unique URL (e.g. story-forge-<hash>-jbass-devs-projects.vercel.app) separate
+// from the stable production domain above. This pattern matches both the
+// stable production alias (story-forge-tau-three) and any per-deploy preview
+// URL, so CORS doesn't break just because someone opens a deployment-specific
+// link (which Vercel shows after every deploy) instead of the production URL.
+const VERCEL_PATTERN = /^https:\/\/story-forge-[a-z0-9-]+\.vercel\.app$/;
 
 app.use(
-  cors(
-    allowedOrigins.length
-      ? {
-          origin(origin, callback) {
-            if (!origin || allowedOrigins.includes(origin) || VERCEL_PREVIEW_PATTERN.test(origin)) {
-              callback(null, true);
-            } else {
-              callback(new Error("Not allowed by CORS"));
-            }
-          },
-        }
-      : {}
-  )
+  cors({
+    origin(origin, callback) {
+      // Allow same-origin/non-browser requests (no Origin header) and any
+      // whitelisted or StoryForge Vercel origin.
+      if (!origin || allowedOrigins.includes(origin) || VERCEL_PATTERN.test(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+  })
 );
 app.use(express.json());
 
