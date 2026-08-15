@@ -11,7 +11,7 @@ An AI-generated short-drama video app (a portfolio project). You give it a one-l
 
 ```
 User prompt
-   -> Groq (Llama 3.3 70B): generates a structured JSON script (title, hook,
+   -> Groq (GPT-OSS 120B): generates a structured JSON script (title, hook,
       style, narrator gender, scenes with visual/narration/camera/duration,
       ending, hashtags). Targets ~60 seconds total (7-9 scenes, 7-10s each).
    -> Groq: turns each scene into a detailed, cinematic image-generation prompt
