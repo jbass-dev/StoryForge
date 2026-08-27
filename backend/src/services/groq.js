@@ -2,7 +2,16 @@ import fetch from "node-fetch";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
-async function callGroq(systemPrompt, userPrompt) {
+async function callGroq(systemPrompt, userPrompt, schema) {
+  // Strict structured output uses constrained decoding: the model can only
+  // emit tokens that keep the response schema-valid, so the malformed JSON
+  // (loose array elements missing their braces) that json_object mode let
+  // through Groq's validator is now impossible. Falls back to plain
+  // json_object when no schema is supplied.
+  const response_format = schema
+    ? { type: "json_schema", json_schema: { name: schema.name, strict: true, schema: schema.schema } }
+    : { type: "json_object" };
+
   const res = await fetch(GROQ_URL, {
     method: "POST",
     headers: {
@@ -15,8 +24,12 @@ async function callGroq(systemPrompt, userPrompt) {
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      temperature: 0.9,
-      response_format: { type: "json_object" },
+      // Lowered from 0.9: high temperature pushed the model off the JSON
+      // structure on long generations and made character descriptions drift
+      // scene to scene. Strict decoding below guarantees validity regardless,
+      // but a calmer temperature keeps the content coherent.
+      temperature: 0.7,
+      response_format,
     }),
   });
 
@@ -29,6 +42,78 @@ async function callGroq(systemPrompt, userPrompt) {
   const content = data.choices?.[0]?.message?.content;
   return JSON.parse(content);
 }
+
+// JSON Schemas for Groq strict structured outputs. Strict mode requires every
+// object to set additionalProperties:false and list all properties as required.
+const STORY_SCHEMA = {
+  name: "story",
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["title", "hook", "style", "narrator_gender", "characters", "scenes", "ending", "hashtags"],
+    properties: {
+      title: { type: "string" },
+      hook: { type: "string" },
+      style: { type: "string" },
+      narrator_gender: { type: "string", enum: ["male", "female"] },
+      characters: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["name", "appearance"],
+          properties: {
+            name: { type: "string" },
+            appearance: { type: "string" },
+          },
+        },
+      },
+      scenes: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["scene", "visual", "narration", "camera", "duration_seconds", "characters_present"],
+          properties: {
+            scene: { type: "integer" },
+            visual: { type: "string" },
+            narration: { type: "string" },
+            camera: { type: "string" },
+            duration_seconds: { type: "number" },
+            characters_present: { type: "array", items: { type: "string" } },
+          },
+        },
+      },
+      ending: { type: "string" },
+      hashtags: { type: "array", items: { type: "string" } },
+    },
+  },
+};
+
+const IMAGE_PROMPTS_SCHEMA = {
+  name: "image_prompts",
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["image_prompts"],
+    properties: {
+      image_prompts: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["scene", "prompt_start", "prompt_end", "negative_prompt"],
+          properties: {
+            scene: { type: "integer" },
+            prompt_start: { type: "string" },
+            prompt_end: { type: "string" },
+            negative_prompt: { type: "string" },
+          },
+        },
+      },
+    },
+  },
+};
 
 const STORY_SYSTEM_PROMPT = `You are an expert AI story-to-short-form video planner.
 Your job is to convert user ideas into structured short-form video scripts for a TikTok/Reels-style app.
@@ -78,7 +163,7 @@ Return a JSON object with this exact structure:
   "hashtags": ["string"]
 }`;
 
-  return callGroq(STORY_SYSTEM_PROMPT, prompt);
+  return callGroq(STORY_SYSTEM_PROMPT, prompt, STORY_SCHEMA);
 }
 
 // Rendering target is comic-book/manga panel art (VibeShort-style motion
@@ -133,5 +218,5 @@ Return JSON in this format:
   ]
 }`;
 
-  return callGroq(IMAGE_PROMPT_SYSTEM_PROMPT, prompt);
+  return callGroq(IMAGE_PROMPT_SYSTEM_PROMPT, prompt, IMAGE_PROMPTS_SCHEMA);
 }
