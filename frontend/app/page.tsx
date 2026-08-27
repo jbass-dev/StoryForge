@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 const PINNED_REEL_ID = "7a9093c3-ca3f-42c4-8278-0fd4f0ccfdd7";
 
 const TECH_PILLS = [
-  "Groq Llama 3.3",
+  "Groq GPT-OSS 120B",
   "Pollinations.ai",
   "Edge TTS",
   "FFmpeg",

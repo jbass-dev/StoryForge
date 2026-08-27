@@ -1,0 +1,37 @@
+# Render Blueprint for StoryForge backend.
+# Deploys the Express API (Groq -> Pollinations -> Edge TTS -> FFmpeg) as a
+# free web service. FFmpeg is bundled via ffmpeg-static (no system install).
+# Postgres lives on Neon; object storage on Cloudflare R2. Secrets marked
+# `sync: false` are entered in the Render dashboard at deploy time.
+services:
+  - type: web
+    name: storyforge-backend
+    runtime: node
+    rootDir: backend
+    plan: free
+    region: oregon
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
+      - key: FRONTEND_URL
+        value: https://story-forge-tau-three.vercel.app
+      - key: GROQ_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: R2_PUBLIC_URL
+        sync: false

@@ -15,9 +15,10 @@ function getPool() {
   if (!pool) {
     pool = new Pool({
       connectionString: DATABASE_URL,
-      // Railway's managed Postgres requires SSL but uses a self-signed cert
-      // chain that Node won't validate by default.
-      ssl: DATABASE_URL.includes("railway") ? { rejectUnauthorized: false } : undefined,
+      // Managed Postgres (Neon, Supabase, Render, Railway) all require SSL and
+      // present certs Node won't validate by default. Enable SSL for any
+      // non-local database; local dev over localhost stays plaintext.
+      ssl: /localhost|127\.0\.0\.1/.test(DATABASE_URL) ? undefined : { rejectUnauthorized: false },
     });
   }
   return pool;
