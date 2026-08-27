@@ -156,7 +156,16 @@ async function runGenerationPipeline(id, prompt, genre, job) {
   const story = await generateStory(prompt, genre);
 
   job.stage = "writing image prompts";
-  const { image_prompts } = await generateImagePrompts(story.scenes, story.style, story.characters);
+  // Defense in depth: if image-prompt generation ever fails outright, don't kill
+  // the reel - fall back to an empty set so every scene uses its own visual
+  // description (handled per-scene below). A finished reel beats a hard error.
+  let image_prompts = [];
+  try {
+    ({ image_prompts } = await generateImagePrompts(story.scenes, story.style, story.characters));
+  } catch (err) {
+    console.warn(`Image-prompt generation failed (${err.message}) - falling back to per-scene visual descriptions; reel still proceeds.`);
+    image_prompts = [];
+  }
 
   job.totalScenes = story.scenes.length;
 

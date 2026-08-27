@@ -2,45 +2,63 @@ import fetch from "node-fetch";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
-async function callGroq(systemPrompt, userPrompt, schema) {
-  // Strict structured output uses constrained decoding: the model can only
-  // emit tokens that keep the response schema-valid, so the malformed JSON
-  // (loose array elements missing their braces) that json_object mode let
-  // through Groq's validator is now impossible. Falls back to plain
-  // json_object when no schema is supplied.
-  const response_format = schema
-    ? { type: "json_schema", json_schema: { name: schema.name, strict: true, schema: schema.schema } }
-    : { type: "json_object" };
-
-  const res = await fetch(GROQ_URL, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      // Lowered from 0.9: high temperature pushed the model off the JSON
-      // structure on long generations and made character descriptions drift
-      // scene to scene. Strict decoding below guarantees validity regardless,
-      // but a calmer temperature keeps the content coherent.
-      temperature: 0.7,
-      response_format,
-    }),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Groq API error (${res.status}): ${text}`);
+// Extract and parse a JSON object from a model completion. gpt-oss sometimes
+// wraps its output in ```json fences or emits a little stray prose despite the
+// instructions, so strip fences and take the outermost {...} before parsing.
+function parseModelJson(content) {
+  let text = String(content || "").trim();
+  text = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  const first = text.indexOf("{");
+  const last = text.lastIndexOf("}");
+  if (first !== -1 && last !== -1 && last > first) {
+    text = text.slice(first, last + 1);
   }
+  return JSON.parse(text);
+}
 
-  const data = await res.json();
-  const content = data.choices?.[0]?.message?.content;
-  return JSON.parse(content);
+async function callGroq(systemPrompt, userPrompt, schema) {
+  // We deliberately do NOT use Groq's response_format json_object / json_schema
+  // modes. gpt-oss-120b's server-side JSON validation on Groq is unreliable - it
+  // rejects even well-formed, schema-conformant JSON with a json_validate_failed
+  // 400. Instead the system prompts require pure JSON and we parse it ourselves,
+  // retrying once on the rare genuine parse miss. `schema` is accepted for call-
+  // site compatibility and documents the expected shape, but isn't sent to Groq.
+  let lastErr;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const res = await fetch(GROQ_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        // Calmer temperature keeps the model on the JSON structure and keeps
+        // character descriptions consistent scene to scene.
+        temperature: 0.6,
+      }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      lastErr = new Error(`Groq API error (${res.status}): ${text}`);
+      continue;
+    }
+
+    const data = await res.json();
+    const content = data.choices?.[0]?.message?.content;
+    try {
+      return parseModelJson(content);
+    } catch (err) {
+      console.warn(`Groq JSON parse failed (attempt ${attempt}/2): ${err.message} - retrying.`);
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error("Groq call failed after retries");
 }
 
 // JSON Schemas for Groq strict structured outputs. Strict mode requires every
