@@ -1,7 +1,11 @@
 // Pollinations.ai - free, no API key required.
 // Docs: https://pollinations.ai/
 
-export function buildImageUrl(prompt, { width = 1080, height = 1920, seed } = {}) {
+// Default still size trimmed from 1080x1920: Pollinations' free endpoint is
+// much slower and rate-limits far harder on large images, and the stills
+// are scaled/cropped to the render resolution anyway, so a smaller source
+// means faster generation and dramatically fewer failed fetches.
+export function buildImageUrl(prompt, { width = 720, height = 1280, seed } = {}) {
   const base = process.env.POLLINATIONS_BASE_URL || "https://image.pollinations.ai/prompt";
   const encoded = encodeURIComponent(prompt);
   const params = new URLSearchParams({

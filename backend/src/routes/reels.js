@@ -15,6 +15,11 @@ const router = express.Router();
 
 const STORAGE_DIR = path.join(process.cwd(), "storage");
 
+// Bundled placeholder still. If Pollinations fails outright even for the very
+// first image, the reel falls back to this dark atmospheric panel instead of
+// crashing - it reads as an intentional moody frame, never a broken image.
+const FALLBACK_IMAGE = path.join(process.cwd(), "seed-assets", "fallback.jpg");
+
 // Where a scene's start/end stills should be WRITTEN when generating fresh
 // images for it (initial generation, or the target of a regenerate). Always
 // the modern filenames - this is brand-new content, there's no legacy file
@@ -165,6 +170,9 @@ async function runGenerationPipeline(id, prompt, genre, job) {
   // Each scene needs TWO stills (start/end pose) so ffmpeg can
   // motion-interpolate between them.
   const scenesWithImages = [];
+  // Tracks the most recent successfully downloaded still, seeded with the
+  // bundled placeholder, so a failed image can always reuse real art.
+  let lastGoodStill = FALLBACK_IMAGE;
   for (let i = 0; i < story.scenes.length; i++) {
     const scene = story.scenes[i];
     job.currentScene = i + 1;
@@ -185,13 +193,36 @@ async function runGenerationPipeline(id, prompt, genre, job) {
     const promptEnd = imgPrompt?.prompt_end || scene.visual;
     const { imagePathStart, imagePathEnd } = scenePaths(workDir, scene.scene);
 
-    const { url: urlStart } = await generateSceneImage(promptStart);
-    await downloadImage(urlStart, imagePathStart);
+    // Resilient image fetch: a single failed or rate-limited Pollinations image
+    // must never crash the whole reel (that was surfacing a raw error on the
+    // live showcase). On failure we reuse the last good still - or this scene's
+    // start still for a failed end pose - so the scene just loses its motion,
+    // not its art, and generation always completes.
+    let urlStart = null;
+    let urlEnd = null;
+    let startOk = false;
+    try {
+      ({ url: urlStart } = await generateSceneImage(promptStart));
+      await downloadImage(urlStart, imagePathStart);
+      lastGoodStill = imagePathStart;
+      startOk = true;
+    } catch (err) {
+      console.warn(`Scene ${scene.scene} start image failed (${err.message}) - reusing last good art so the reel still finishes.`);
+      fs.mkdirSync(path.dirname(imagePathStart), { recursive: true });
+      fs.copyFileSync(lastGoodStill, imagePathStart);
+    }
 
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
-    const { url: urlEnd } = await generateSceneImage(promptEnd);
-    await downloadImage(urlEnd, imagePathEnd);
+    try {
+      ({ url: urlEnd } = await generateSceneImage(promptEnd));
+      await downloadImage(urlEnd, imagePathEnd);
+      lastGoodStill = imagePathEnd;
+    } catch (err) {
+      console.warn(`Scene ${scene.scene} end image failed (${err.message}) - reusing this scene's start art.`);
+      fs.mkdirSync(path.dirname(imagePathEnd), { recursive: true });
+      fs.copyFileSync(startOk ? imagePathStart : lastGoodStill, imagePathEnd);
+    }
 
     scenesWithImages.push({
       ...scene,
